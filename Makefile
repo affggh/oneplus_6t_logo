@@ -8,4 +8,4 @@ src = op6tlogo.go
 all: op6tlogo
 
 op6tlogo:
-  @$(GO) build -ldflags $(LDFLAGS) $(src)
+	@$(GO) build -ldflags $(LDFLAGS) $(src)
