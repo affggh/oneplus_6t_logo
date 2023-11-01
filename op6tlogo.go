@@ -165,6 +165,9 @@ func (header *OP6TLogoHeader) Repack(reader io.ReadWriteSeeker, picdir string, o
 		return string(s)
 	}
 	offupper := func(off uint32) uint32 {
+		if off%0x1000 == 0 {
+			return off
+		}
 		return ((off >> 0xc) + 1) << 0xc
 	}
 	rgba2rgb := func(img image.Image, width int, height int) []byte {
@@ -187,17 +190,17 @@ func (header *OP6TLogoHeader) Repack(reader io.ReadWriteSeeker, picdir string, o
 		return buf.Bytes()
 	}
 	//writeto := func() {}
-	offsets := make([]uint32, len(header.Offsets))
+	//offsets := make([]uint32, len(header.Offsets))
 	hdr := OP6TLogoHeader{}
 	off := uint32(0)
 
 	result := new(bytes.Buffer)
 	for index, offset := range header.Offsets {
 		if off == 0 {
-			offsets[index] = off
+			header.Offsets[index] = off
 		} else {
 			off = offupper(off)
-			offsets[index] = off
+			header.Offsets[index] = off
 		}
 		reader.Seek(int64(offset), io.SeekStart)
 		binary.Read(reader, binary.LittleEndian, &hdr)
@@ -206,7 +209,7 @@ func (header *OP6TLogoHeader) Repack(reader io.ReadWriteSeeker, picdir string, o
 
 		if hdr.LengthOfData == 0 {
 			fmt.Printf("Skip\n")
-			offset += uint32(binary.Size(hdr))
+			off += uint32(binary.Size(hdr))
 			binary.Write(result, binary.LittleEndian, &hdr)
 			continue
 		}
@@ -227,18 +230,29 @@ func (header *OP6TLogoHeader) Repack(reader io.ReadWriteSeeker, picdir string, o
 		rawdata := rgba2rgb(img, imginfo.X, imginfo.Y)
 		rledata := Raw2Rle(rawdata)
 
+		if index == 0 {
+			header.Width = hdr.Width
+			header.Height = hdr.Height
+			header.LengthOfData = hdr.LengthOfData
+		}
+
 		//print(len(rledata))
 		fmt.Printf("Done\n")
 
+		off += uint32(binary.Size(hdr))
+		if hdr.LengthOfData != 0 {
+			off += uint32(len(rledata))
+		}
+
 		binary.Write(result, binary.LittleEndian, &hdr)
-		binary.Write(result, binary.LittleEndian, &rledata)
+		if hdr.LengthOfData != 0 {
+			binary.Write(result, binary.LittleEndian, &rledata)
+		}
 
-		offset += uint32(binary.Size(hdr))
-		offset += uint32(len(rledata))
-
-		for j := uint32(0); j < offupper(offset)-offset; j++ { // Padding
+		for j := uint32(0); j < offupper(off)-off; j++ { // Padding
 			result.WriteByte(0)
 		}
+
 	}
 
 	ofd, err := os.Create(outfile)
@@ -247,7 +261,12 @@ func (header *OP6TLogoHeader) Repack(reader io.ReadWriteSeeker, picdir string, o
 		return err
 	}
 	defer ofd.Close()
-	ofd.Write(result.Bytes())
+	// update offsets
+	for index, offset := range header.Offsets {
+		println(index, offset)
+	}
+	binary.Write(ofd, binary.LittleEndian, header)
+	ofd.Write(result.Bytes()[binary.Size(hdr):])
 
 	return nil
 }
